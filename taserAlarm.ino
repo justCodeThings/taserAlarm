@@ -1,3 +1,7 @@
+//lol.
+//You fucking clicked the link to read my code
+//You fucking nerd.
+
 /* Author: Kelsey Williams
  * Yeah, so, this is an alarm clock that
  * tases you instead of beeping.  I used
