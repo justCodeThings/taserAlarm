@@ -77,11 +77,6 @@ bool alarmTripped = false;
 uint32_t delta = millis();
 uint32_t elapMillis = 0;
 
-// Time to measure pulses between zaps
-uint32_t trippedTime;
-
-uint16_t count = 0;
-
 TM1637Display display = TM1637Display(CLK, DIO);
 
 void setup() {
@@ -122,105 +117,43 @@ void setup() {
   display.clear();
   display.setBrightness(0);
 }
+
 void loop() {
+  tick();
   keyListener();
-  // Count the time in milliseconds
-  elapMillis = millis() - delta;
-  countTime();
-  // Display the time
-  if(swtkey){
-    DisplayTime();
-    switch(key){
-    case 1:
-      hours++;
-      // Display time on a millis timer.  Delay messes it up
-      // DisplayTime() therefore doesn't work and we just got
-      // to go to the source. 
-      display.showNumberDec(Time, true, 4, 0);
-      delay(250);
-      break;
-    case 2:
-      minutes++;
-      display.showNumberDec(Time, true, 4, 0);
-      delay(250);
-      break;
-    default:
-      break;
-    }
-  }
-  if(!swtkey){
-    DisplayAlarm();
-    switch(key){
-    case 1:
-      ahours++;
-      DisplayAlarm();
-      delay(250);
-      break;
-    case 2:
-      aminutes++;
-      DisplayAlarm();
-      delay(250);
-      break;
-    default:
-       break;
-    }
-  }
-  ALARM();
-  if(alarmTripped){
-    if(elapMillis %3000 == 0){
-      PORTD = PORTD | 0x40;
-    }
-    if(elapMillis %3010 == 0){
-      PORTD = PORTD & 0xbf;
-    }
-  }
-  if(!alarmTripped){
-    //ensure the relay got shut off
-    /* I use direct port manipulation here in order
-     *  to cut down on time spent making sure the 
-     *  relay is truly off.  I use a hexidecimal mask
-     *  in order to make sure only pin 6 is switched
-     *  low.
-     */
-    PORTD = PORTD & 0xbf; //0xbf = 1011 1111
-  }
+  DisplayTime();
+  AlarmHandler();
 }
 
-void countTime(){
-  // One minute passes
-  if(elapMillis > 59000){
+// Set default values
+void DisplayTime(bool = true);
+void adjustClock(uint16_t = hours, uint16_t = minutes);
+
+void tick(){
+  // Count the time in milliseconds
+  elapMillis = millis() - delta;
+  
+  if(elapMillis > 60000){
     minutes++;
     delta = millis();
   }
 
-  // One hour passes
-  if(minutes == 60){
-    hours++;
-  }
-
-  // Reset 12 hour clock
-  if(hours > 12){
-    hours=1;
-  }
-
-  // Reset minutes to 0 after an hour
-  if(aminutes > 59){
-    aminutes=0;
-  }
-
-  // One hour passes
-  if(aminutes == 60){
-    hours++;
-  }
-
-  // Reset 12 hour clock
-  if(ahours > 12){
-    ahours=1;
-  }
-
-  // Reset minutes to 0 after an hour
   if(minutes > 59){
     minutes=0;
+    hours++;
+  }
+
+  if(aminutes > 59){
+    aminutes=0;
+    hours++;
+  }
+
+  if(hours > 12){
+    hours = 1;
+  }
+
+  if(ahours > 12){
+    ahours = 1;
   }
 }
 void keyListener(){
@@ -235,10 +168,12 @@ void keyListener(){
   if(inch.pressed()){
     // Increment hours
     key = 1;
+    adjustClock();
   }
   if(incm.pressed()){
     // Increment minutes
-    key = 2;
+    key = 2;  
+    adjustClock();
   }
   if(stt.pressed()){
     // Start alarm
@@ -249,7 +184,7 @@ void keyListener(){
     key = 4;
   }
   if(inch.released() || incm.released()){
-    key = -1;
+    key = 5;
   }
   if(wrt.pressed()){
     // Break 16bit times into 8bit for EEPROM storage
@@ -263,31 +198,30 @@ void keyListener(){
     }
   }
 }
-
-void DisplayTime(){
+void DisplayTime(bool blink){
   Time = ((hours*100)+minutes);
-  if(elapMillis %500 == 0){
+  aTime = ((ahours*100)+minutes);
+  if(swtkey){
+    if(elapMillis %500 == 0){
     display.showNumberDecEx(Time, 0b11100000, true, 4, 0);
+    }
+    if(elapMillis %1000 == 0){
+      display.showNumberDec(Time, true, 4, 0);
+    }
+    if(!blink){
+      display.showNumberDec(Time, true, 4, 0);
+    }
   }
-  if(elapMillis %1000 == 0){
-    display.showNumberDec(Time, true, 4, 0);
+  else{
+    display.showNumberDecEx(aTime, 0b11100000, true, 4, 0);
   }
 }
-
-void DisplayAlarm(){
-  aTime = ((ahours*100)+aminutes);
-  display.showNumberDecEx(aTime, 0b11100000, true, 4, 0);
-}
-void ALARM(){
+void AlarmHandler(){
   if(alarmOn){
     digitalWrite(ALED, HIGH);
     if(ahours == hours and aminutes == minutes){
        alarmTripped = true;
     }
-  }
-  else{
-    alarmTripped = false;
-    digitalWrite(ALED, LOW);
   }
   switch(key){
     case 3:
@@ -297,8 +231,63 @@ void ALARM(){
     case 4:
       alarmOn = false;
       alarmTripped = false;
+      digitalWrite(ALED, LOW);
       key = -1;
       break;
+    default:
+      break;
+  }
+  if(alarmTripped){
+    if(elapMillis %3000 == 0){
+      /* I use direct port manipulation to control the 
+       *  relay in order to cut down on time spent making 
+       *  sure the relay is truly off.  I use a hexidecimal 
+       *  mask in order to make sure only pin 6 is switched
+       *  low. Please note that these ports will only
+       *  work on the Arduino UNO board.
+       */
+       // Set pin 6 HIGH
+      PORTD = PORTD | 0x40; //0x40 mask.  0x40 = 0100 0000
+    }
+    if(elapMillis %3010 == 0){
+      // Set pin 6 LOW
+      PORTD = PORTD & 0xbf; //0xbf mask. 0xbf = 1011 1111
+    }
+  }
+  if(!alarmTripped){
+    //ensure the relay got shut off
+    PORTD = PORTD & 0xbf;
+  }
+}
+void adjustClock(uint16_t thours, uint16_t tminutes){
+  if(!swtkey){
+    adjustClock(ahours, aminutes);
+  }
+  switch(key){
+    case 1:
+      thours++;
+      if(thours > 12){
+        thours = 0;
+      }
+      DisplayTime(false);
+      delay(500);
+      break;
+    case 2:
+      tminutes++;
+      if(tminutes > 59){
+        tminutes = 0;
+      }
+      DisplayTime(false);
+      break;
+    case 5:
+      if(swtkey){
+        hours = thours;
+        minutes = tminutes;
+      }
+      else{
+        ahours = thours;
+        aminutes = tminutes;
+      }
     default:
       break;
   }
