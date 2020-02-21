@@ -5,11 +5,15 @@
  * time, a relay to control a ViperTech taser that 
  * I presoldered wires to to overide the manual button,
  * and a bunch of buttons on a bread board to set
- * alarm times and whatever.  Idfk.  It's 
- * absolutely retarded and thats what I love about
- * it. Anyways here's the pinout.
+ * alarm times and clock times and save them to memory
+ * and whatever.  Idfk.  It's absolutely retarded and 
+ * thats what I love about it. Anyways here's the pinout.
  * 
  *  ***pinout (as used by moi)***
+ *  !I used an Arduino Uno for this, if you're sampling!
+ *  !code or something, make sure you got your own pinout!
+ *  !and change the manual port forwarding i did.!
+ *  
  * TM1637 display digital i/o = 13
  * TM1637 display clock pin = 12 
  * button to switch between clock and alarm setup = 11
@@ -21,9 +25,9 @@
  * pin for "armed" led = 5
  * Button to write clock and alarm to EEPROM = 4
  */
- /*Also. Fucking remember that the documentation for Button.h 
+ /*Also. Remember that the documentation for Button.h 
   * on arduino playground is utter horsehsit.  
-  Don't even bother reading it.*/
+  Don't even bother reading it.  Bunch of fuckers.*/
 #include <EEPROM.h>
 #include <Button.h>
 #include <TM1637Display.h>
@@ -36,8 +40,8 @@ uint16_t CLK = 12;
 uint16_t ALED = 5;
 uint16_t RELAY = 6;
 
-/* This bool is used to switch the display from the current time
- *  (swtkey = true), to the set alarm time (swtkey = false).
+/* This bool is used to switch the display from the "set current time"
+ *  (swtkey = true), to the "set alarm time" (swtkey = false) mode.
  */
 bool swtkey = true;
 
@@ -53,8 +57,8 @@ Button stp = Button(7);
 Button wrt = Button(4);
 
 // Get saved Time from EEPROM and reconstruct from 8bit int to 16 bit
-uint16_t loadT = ((uint16_t)EEPROM.read(0) << 8) | EEPROM.read(1);
-uint16_t loadA = ((uint16_t)EEPROM.read(2) << 8) | EEPROM.read(3);
+uint16_t loadT = (uint16_t)EEPROM[0] << 8 | EEPROM[1];
+uint16_t loadA = (uint16_t)EEPROM[2] << 8 | EEPROM[3];
 
 // Unformat time saved to EEPROM back to minutes and hours
 // Clock time
@@ -64,6 +68,10 @@ uint16_t minutes;
 // Alarm time
 uint16_t ahours;
 uint16_t aminutes;
+
+// Temp variables for clock adjustment
+uint16_t thours;
+uint16_t tminutes;
 
 // Initialize Time
 uint16_t Time;
@@ -93,15 +101,15 @@ void setup() {
    *  arithmetic will result in a floating point number, upgrading
    *  our int to a float as C++ does; something I really  don't want.  
    *  This if statement is an attempt to protect the program from this
-   *  on a first time EEPROM read.
+   *  on a first time EEPROM read by looking for a floating point.
    */
-  if(loadT != 0xffff){
+  if(floor(loadT) - loadT == 0 && floor(loadA)- loadA == 0){
     hours =  loadT / 100;
     minutes = loadT - (hours * 100);
     
     // Alarm time
     ahours = loadA / 100;
-    aminutes = loadA - (loadA * 100);
+    aminutes = loadA - (ahours * 100);
   }
   else{
     hours = 12;
@@ -118,17 +126,17 @@ void setup() {
   display.setBrightness(0);
 }
 
+// Set default values
+void DisplayTime(uint16_t = hours, uint16_t = minutes, uint16_t = ahours, uint16_t = aminutes, bool = true);
+void adjustClock(uint16_t = hours, uint16_t = minutes, uint16_t = ahours, uint16_t = aminutes);
+
 void loop() {
   tick();
-  keyListener();
   DisplayTime();
   AlarmHandler();
+  adjustClock();
+  keyListener();
 }
-
-// Set default values
-void DisplayTime(bool = true);
-void adjustClock(uint16_t = hours, uint16_t = minutes);
-
 void tick(){
   // Count the time in milliseconds
   elapMillis = millis() - delta;
@@ -168,12 +176,10 @@ void keyListener(){
   if(inch.pressed()){
     // Increment hours
     key = 1;
-    adjustClock();
   }
   if(incm.pressed()){
     // Increment minutes
     key = 2;  
-    adjustClock();
   }
   if(stt.pressed()){
     // Start alarm
@@ -192,28 +198,28 @@ void keyListener(){
     uint8_t TimeA = (uint8_t)(Time >> 8);
     uint8_t aTimeB = (uint8_t)aTime;
     uint8_t aTimeA = (uint8_t)(aTime >> 8);
-    uint32_t vals[] = {TimeA, TimeB, aTimeA, aTimeB};
+    uint8_t vals[] = {TimeA, TimeB, aTimeA, aTimeB};
     for(uint16_t i = 0; i < 4; i++){
       EEPROM.write(i, vals[i]);
     }
   }
 }
-void DisplayTime(bool blink){
-  Time = ((hours*100)+minutes);
-  aTime = ((ahours*100)+minutes);
+void DisplayTime(uint16_t h, uint16_t m, uint16_t ah, uint16_t am, bool blink){
+  Time = ((h*100)+m);
+  aTime = ((ah*100)+am);
   if(swtkey){
     if(elapMillis %500 == 0){
-    display.showNumberDecEx(Time, 0b11100000, true, 4, 0);
+    display.showNumberDecEx(Time, 0b11100000, false, 4, 0);
     }
     if(elapMillis %1000 == 0){
-      display.showNumberDec(Time, true, 4, 0);
+      display.showNumberDec(Time, false, 4, 0);
     }
     if(!blink){
-      display.showNumberDec(Time, true, 4, 0);
+      display.showNumberDec(Time, false, 4, 0);
     }
   }
-  else{
-    display.showNumberDecEx(aTime, 0b11100000, true, 4, 0);
+  if(!swtkey){
+    display.showNumberDecEx(aTime, 0b11100000, false, 4, 0);
   }
 }
 void AlarmHandler(){
@@ -259,36 +265,44 @@ void AlarmHandler(){
     PORTD = PORTD & 0xbf;
   }
 }
-void adjustClock(uint16_t thours, uint16_t tminutes){
-  if(!swtkey){
-    adjustClock(ahours, aminutes);
-  }
+void adjustClock(uint16_t h, uint16_t m, uint16_t ah, uint16_t am){
   switch(key){
     case 1:
+      delay(500);
       thours++;
       if(thours > 12){
-        thours = 0;
+        thours = 1;
       }
-      DisplayTime(false);
-      delay(500);
+      DisplayTime(thours, tminutes, thours, tminutes, false);
       break;
     case 2:
+      delay(500);
       tminutes++;
       if(tminutes > 59){
         tminutes = 0;
       }
-      DisplayTime(false);
+      DisplayTime(thours, tminutes, thours, tminutes, false);
       break;
     case 5:
       if(swtkey){
         hours = thours;
         minutes = tminutes;
       }
-      else{
+      if(!swtkey){
         ahours = thours;
         aminutes = tminutes;
       }
+      key = -1;
+      break;
     default:
+      if(swtkey){
+        thours = h;
+        tminutes = m;
+      }
+      if(!swtkey){
+        thours = ah;
+        tminutes = am;
+      }
       break;
   }
 }
